@@ -1,9 +1,23 @@
 [package]
 name = "sponk"
-version = "0.1.0"
+description = "High performance http server for http client benchmark (linux 5.10+ only)"
+version = "0.0.1"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+authors = ["Wireless4024"]
+repository = "https://github.com/Wireless4024/sponk.git"
 
 [dependencies]
+bstr = "1"
+clap = { version = "4", features = ["derive"] }
+futures = { version = "0.3", features = [] }
+num_cpus = "1"
 tokio-uring = "0.3"
+
+[profile.release]
+opt-level = 3
+panic = "abort"
+lto = "fat"
+codegen-units = 1
+debug-assertions = false
+debug = false
+strip = true
