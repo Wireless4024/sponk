@@ -16,7 +16,7 @@ pub async fn new_http1_server(port: u16) -> io::Result<()> {
 }
 
 async fn handle_client(client: TcpStream) -> io::Result<()> {
-	let mut read_buf = vec![0u8; 8192];
+	let mut read_buf = vec![0u8; 16384];
 
 	loop {
 		let (res, buf) = client.read(read_buf).await;
@@ -38,10 +38,11 @@ async fn handle_client(client: TcpStream) -> io::Result<()> {
 		}
 		let drain_from = len - remain;
 		if drain_from < len {
-			read_buf.drain(..=drain_from);
-		} else {
+			panic!("Errr? Big request is not supported at this time");
+			//read_buf.drain(..=drain_from);
+		}/* else {
 			unsafe { read_buf.set_len(0); }
-		}
+		}*/
 	}
 	Ok(())
 }

@@ -3,7 +3,8 @@
 High performance http server based on `io_uring` for http client performance testing.  
 It only response `Hello world\n` to maximize its performance.  
 **Note: Linux 5.10+ only!**  
-**Note: This project use unsafe!**
+**Note: This project use unsafe!**  
+**Note: Currently broken with go's http client keep-alive**
 
 <small>Sponk let you squeeze all performance from your machine</small>
 
