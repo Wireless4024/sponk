@@ -13,6 +13,7 @@ mod h1_uring;
 mod cli;
 mod counter;
 mod common;
+mod dual_ring_buffer;
 
 pub type Server = fn(u16, usize) -> JoinHandle<()>;
 
