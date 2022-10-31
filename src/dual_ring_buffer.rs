@@ -1,5 +1,6 @@
 use std::{io, mem};
 use std::cmp::min;
+use std::io::{Chain, Read};
 use std::ops::Deref;
 
 use bstr::ByteVec;
@@ -24,7 +25,7 @@ impl DualRingBuffer {
 			temp: vec![0; capacity],
 			temp_len: 0,
 			temp_ptr: 0,
-			capacity: capacity,
+			capacity,
 		}
 	}
 
@@ -39,6 +40,62 @@ impl DualRingBuffer {
 		self.buffer_ptr = 0;
 		self.buffer_len = len;
 		self.buffer_len != 0
+	}
+
+	pub fn peek(&self) -> (bool, BufferRef) {
+		if self.temp_len == 0 {
+			(true, BufferRef {
+				inner: &self.buffer,
+				ptr: self.buffer_ptr,
+				len: self.buffer_len,
+			})
+		} else {
+			(false, BufferRef {
+				inner: &self.temp,
+				ptr: self.temp_ptr,
+				len: self.temp_len,
+			})
+		}
+	}
+
+	fn consume_temp(&mut self, len: usize) -> usize {
+		// consume less than or equals to len of temp variable
+		// just shift ptr and reduce len
+		self.temp_ptr += len;
+		self.temp_len -= len;
+		len
+	}
+
+	fn consume_buf(&mut self, len: usize) -> usize {
+		let buf_len = self.buffer_len;
+		if len <= buf_len {
+			self.buffer_ptr += len;
+			self.buffer_len -= len;
+			len
+		} else {
+			let success = len - buf_len;
+			self.buffer_ptr += success;
+			self.buffer_len -= success;
+			success
+		}
+	}
+
+	/// consume internal buffer with given length; return number of bytes consumed
+	fn consume(&mut self, len: usize) -> usize {
+		if len <= self.temp_len {
+			self.consume_temp(len)
+		} else {
+			let temp_consume = self.consume_temp(self.temp_len);
+			let remains = len - temp_consume;
+			self.consume_buf(remains)
+		}
+	}
+
+	pub fn peek_all(&self) -> Chain<&[u8], &[u8]> {
+		let temp_ptr = self.temp_ptr;
+		let buff_ptr = self.buffer_ptr;
+		self.temp[temp_ptr..temp_ptr + self.temp_len]
+			.chain(&self.buffer[buff_ptr..buff_ptr + self.buffer_len])
 	}
 
 	pub async fn read_tcp(&mut self, client: &TcpStream) -> io::Result<bool> {
@@ -92,9 +149,9 @@ impl DualRingBuffer {
 			}
 		}
 		// should be empty buffer
-		let mut buffer = mem::replace(&mut self.buffer, vec![0; cap]);
-		if buffer.capacity() > cap {
-			buffer = vec![0; cap];
+		let mut buffer = mem::take(&mut self.buffer);// will replace by push buf
+		if buffer.len() > cap {
+			unsafe { buffer.set_len(cap) };
 		}
 		buffer
 	}
@@ -160,6 +217,14 @@ impl DualRingBuffer {
 	pub fn should_fill(&self) -> bool {
 		self.temp_len == 0
 	}
+
+	pub fn len(&self) -> usize {
+		self.buffer_len + self.temp_len
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.buffer_len == 0
+	}
 }
 
 #[derive(Debug)]
@@ -169,7 +234,22 @@ pub struct Buffer {
 	pub len: usize,
 }
 
+#[derive(Debug)]
+pub struct BufferRef<'a> {
+	pub inner: &'a Vec<u8>,
+	pub ptr: usize,
+	pub len: usize,
+}
+
 impl Deref for Buffer {
+	type Target = [u8];
+
+	fn deref(&self) -> &Self::Target {
+		&self.inner[self.ptr..self.ptr + self.len]
+	}
+}
+
+impl<'a> Deref for BufferRef<'a> {
 	type Target = [u8];
 
 	fn deref(&self) -> &Self::Target {
@@ -186,6 +266,9 @@ unsafe fn drain_head(it: &mut Vec<u8>, off: usize, len: usize) {
 
 #[cfg(test)]
 mod tests {
+	use std::io::Read;
+	use std::ops::Deref;
+
 	use bstr::ByteSlice;
 
 	use crate::dual_ring_buffer::{drain_head, DualRingBuffer};
@@ -236,5 +319,38 @@ mod tests {
 		//println!("{:?}", res);
 		assert_eq!(res.inner.capacity(), cap);
 		assert_eq!(res.len, cap);
+	}
+
+	#[test]
+	fn test_consume() {
+		let cap = 3;
+		let mut drb = DualRingBuffer::new(cap);
+		drb.append(b"foo");
+		let (is_buf, bref) = drb.peek();
+
+		assert!(is_buf);
+		assert_eq!(drb.len(), 3);
+		assert_eq!(bref.deref(), b"foo");
+
+		drb.consume(3);
+		assert_eq!(drb.len(), 0);
+
+		drb.append(b"bar");
+		let (is_buf, bref) = drb.peek();
+
+		assert!(is_buf);
+		assert_eq!(drb.len(), 3);
+		assert_eq!(bref.deref(), b"bar");
+		drb.append(b"baz");
+		drb.append(b"qux");
+		let mut data = Vec::new();
+		drb.peek_all().read_to_end(&mut data).ok();
+		assert_eq!(data, b"barbazqux".to_vec());
+		assert_eq!(drb.len(), 9);
+		drb.consume(7);
+		let (is_buf, bref) = drb.peek();
+		assert!(is_buf);
+		assert_eq!(drb.len(), 2);
+		assert_eq!(bref.deref(), b"ux");
 	}
 }
